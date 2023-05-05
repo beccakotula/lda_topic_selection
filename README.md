@@ -1,2 +1,3 @@
 # lda_topic_selection
-JHU Statistics Course Project
+Statistics Course Project
+Rebecca Kotula
