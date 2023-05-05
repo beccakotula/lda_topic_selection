@@ -1,0 +1,311 @@
+---
+title: "Final Project- Repeatable Experiments"
+subtitle: "726 Theory of Statistics II"
+author: "Rebecca Kotula"
+output: pdf_document
+---
+
+## Load Packages and Data
+
+```{r, warning=FALSE}
+library(tidyverse)
+library(stopwords)
+library(tm)
+library(topicmodels)
+library(tidytext)
+library(ggwordcloud)
+library(ggthemes)
+library(ldatuning)
+library(reshape)
+library(wesanderson)
+library(lda)
+library(ramify)
+
+theme_set(theme_tufte())
+
+filepath <- "~/Library/Mobile Documents/com~apple~CloudDocs/Documents/JHU/Theory of Statistics II/Project/blogtext.csv"
+data <- read.csv(filepath)
+
+data <- data[,c(1,7,4)]
+colnames(data) <- c("doc_id", "text", "topic")
+data <- data[data$topic != "indUnk",]
+data <- data[data$topic != "Student",]
+set.seed(1234)
+data <- sample_n(data, 10000)
+```
+
+## Plot topic distribution
+
+```{r}
+h <- ggplot(data, aes(x=topic)) + geom_bar(fill='olivedrab')+ theme_tufte() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    ylab("Document Count") + xlab("Topic") 
+h
+```
+
+## Data Cleaning
+
+```{r}
+prepare_data <- function(data) {
+    docs <- Corpus(DataframeSource(data)) %>%
+        tm_map(removePunctuation) %>%
+        tm_map(content_transformer(tolower)) %>%
+        tm_map(removeNumbers) %>%
+        tm_map(removeWords, stopwords("english")) %>%
+        tm_map(removeWords, "urllink") %>%
+        tm_map(stripWhitespace)
+    return(docs)
+}
+```
+
+## Document-Term Matrix
+
+```{r}
+docs <- prepare_data(data)
+
+dtm <- DocumentTermMatrix(docs, control=list(bounds = list(global = c(2,Inf))))
+dtm <- removeSparseTerms(dtm, 0.99)
+
+#Remove empty rows from Vocabulary pruning (from DTM and docs)
+keep.idxs=rowSums(as.matrix(dtm)) > 0
+dtm <- dtm[keep.idxs,]
+data <- data[keep.idxs,]
+```
+
+### Find Topics Number
+
+This parameter search was, in practice, broken down into smaller chunks for computational feasibility (meaning that the whole search from 30 through 70 was not performed in one run).
+
+```{r}
+result <- FindTopicsNumber(
+  dtm,
+  topics = seq(from = 30, to = 70, by = 2),
+  metrics = c("Griffiths2004", "CaoJuan2009", "Arun2010", "Deveaud2014"), 
+  method = "Gibbs",
+  control = list(seed = 1234),
+  mc.cores = 2L,
+  verbose = TRUE
+)
+```
+
+```{r}
+FindTopicsNumber_plot(full_result)
+```
+
+## Fit Selected Models
+
+```{r}
+#Selected # of topics for each model:
+# Baseline 38
+# Griffiths, Arun 70
+# Cao 68
+# Deveaud 52
+
+seed <- 1234
+k <- c(38, 52, 68, 70)
+lda38 <- LDA(dtm, k[1], method="Gibbs", control=list(seed = seed,verbose=25))
+lda52 <- LDA(dtm, k[2], method="Gibbs", control=list(seed = seed,verbose=25))
+lda68 <- LDA(dtm, k[3], method="Gibbs", control=list(seed = seed,verbose=25))
+lda70 <- LDA(dtm, k[4], method="Gibbs", control=list(seed = seed,verbose=25))
+
+
+#topic.top.terms <- terms(ldaOut,25)
+```
+
+## Sample Document Topic Proportions
+
+```{r}
+# create descriptive topic names from characteristic words
+beta38 <- posterior(lda38)$terms
+theta38 <- posterior(lda38)$topics
+topicNames38 <- apply(top.topic.words(beta38, 5, by.score = T), 2, paste, collapse = " ")
+
+beta52 <- posterior(lda52)$terms
+theta52 <- posterior(lda52)$topics
+topicNames52 <- apply(top.topic.words(beta52, 5, by.score = T), 2, paste, collapse = " ")
+
+beta68 <- posterior(lda68)$terms
+theta68 <- posterior(lda68)$topics
+topicNames68 <- apply(top.topic.words(beta68, 5, by.score = T), 2, paste, collapse = " ")
+
+beta70 <- posterior(lda70)$terms
+theta70 <- posterior(lda70)$topics
+topicNames70 <- apply(top.topic.words(beta70, 5, by.score = T), 2, paste, collapse = " ")
+
+```
+
+```{r}
+docs.sample <- c(20, 77, 1505)
+n <- length(docs.sample)
+
+#sample.text <- data[docs.sample,]
+#sample.text$text
+```
+
+```{r}
+#lda38
+topics.in.docs <- theta38[docs.sample,]
+colnames(topics.in.docs) <- topicNames38
+plot.df <- melt(cbind(data.frame(topics.in.docs), document = factor(1:n)), id.vars = "document")  
+ggplot(data = plot.df, aes(variable, value, fill = document)) + 
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+    coord_flip() +
+    labs(x="Topic", y="", title="LDA with 38 Topics")+
+    facet_wrap(~ document, ncol = n) + 
+    scale_fill_manual(values=wes_palette("Darjeeling1", n=n))
+#ggsave("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/JHU/Theory of Statistics II/Project/final_images/lda38_doc_topic_sample.png", height=8)
+```
+
+```{r}
+#lda52
+topics.in.docs <- theta52[docs.sample,]
+colnames(topics.in.docs) <- topicNames52
+plot.df <- melt(cbind(data.frame(topics.in.docs), document = factor(1:n)), id.vars = "document")  
+ggplot(data = plot.df, aes(variable, value, fill = document)) + 
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+    coord_flip() +
+    labs(x="Topic", y="", title="LDA with 52 Topics")+
+    facet_wrap(~ document, ncol = n) + 
+    scale_fill_manual(values=wes_palette("Darjeeling1", n=n))
+#ggsave("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/JHU/Theory of Statistics II/Project/final_images/lda52_doc_topic_sample.png", height = 8)
+```
+
+```{r}
+#lda68
+topics.in.docs <- theta68[docs.sample,]
+colnames(topics.in.docs) <- topicNames68
+plot.df <- melt(cbind(data.frame(topics.in.docs), document = factor(1:n)), id.vars = "document")  
+ggplot(data = plot.df, aes(variable, value, fill = document)) + 
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+    coord_flip() +
+    labs(x="Topic", y="", title="LDA with 68 Topics")+
+    facet_wrap(~ document, ncol = n) + 
+    scale_fill_manual(values=wes_palette("Darjeeling1", n=n))
+#ggsave("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/JHU/Theory of Statistics II/Project/final_images/lda68_doc_topic_sample.png", height = 9)
+```
+
+```{r}
+#lda70
+topics.in.docs <- theta70[docs.sample,]
+colnames(topics.in.docs) <- topicNames70
+plot.df <- melt(cbind(data.frame(topics.in.docs), document = factor(1:n)), id.vars = "document")  
+ggplot(data = plot.df, aes(variable, value, fill = document)) + 
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+    coord_flip() +
+    labs(x="Topic", y="", title="LDA with 70 Topics")+
+    facet_wrap(~ document, ncol = n) + 
+    scale_fill_manual(values=wes_palette("Darjeeling1", n=n))
+#ggsave("~/Library/Mobile Documents/com~apple~CloudDocs/Documents/JHU/Theory of Statistics II/Project/final_images/lda70_doc_topic_sample.png", height=9)
+```
+
+## Get most common topics from each model
+
+```{r}
+topic_props38 <- colSums(theta38)/nDocs(dtm)
+names(topic_props38) <- topicNames38
+top5_topics38 <- sort(topic_props38, decreasing=TRUE)[0:5]
+
+topic_props52 <- colSums(theta52)/nDocs(dtm)
+names(topic_props52) <- topicNames52
+top5_topics52 <- sort(topic_props52, decreasing=TRUE)[0:5]
+
+topic_props68 <- colSums(theta68)/nDocs(dtm)
+names(topic_props68) <- topicNames68
+top5_topics68 <- sort(topic_props68, decreasing=TRUE)[0:5]
+
+topic_props70 <- colSums(theta70)/nDocs(dtm)
+names(topic_props70) <- topicNames70
+top5_topics70 <- sort(topic_props70, decreasing=TRUE)[0:5]
+
+top5_topics_all_models <- data.frame()
+top5_topics_all_models[1:5,"lda38"] <- names(top5_topics38)
+top5_topics_all_models[1:5, "lda52"] <- names(top5_topics52)
+top5_topics_all_models[1:5,"lda68"] <- names(top5_topics68)
+top5_topics_all_models[1:5,"lda70"] <- names(top5_topics70)
+#write.csv(top5_topics_all_models, "~/Library/Mobile Documents/com~apple~CloudDocs/Documents/JHU/Theory of Statistics II/Project/top_topics.csv", row.names=FALSE)
+
+```
+
+## T-SNE
+
+```{r}
+library(Rtsne)
+dtm.matrix <- data.frame(as.matrix(dtm))
+data.sub <- data[!duplicated(dtm.matrix),]
+dtm.matrix <- dtm.matrix[!duplicated(dtm.matrix),]
+tsne_out <-Rtsne(dtm.matrix)
+```
+
+```{r}
+t_dat <- data.frame(tsne_out$Y)
+t_dat$topic <- data.sub$topic
+t <- ggplot(t_dat)+ geom_point(aes(x=X1,y=X2, col=topic))
+t
+#ggsave("./final_images/tsne.png", width=8, height=6)
+```
+
+## Scoring Metric
+
+Checking if topic labels appear in top 100 words from LDA topics (they do not....)
+
+```{r}
+topicwords38 <- top.topic.words(beta38, 100, by.score=T)
+topicwords52 <- top.topic.words(beta52, 100, by.score=T)
+topicwords68 <- top.topic.words(beta68, 100, by.score=T)
+topicwords70 <- top.topic.words(beta70, 100, by.score=T)
+
+
+#top.topic <- argmax(theta38)
+
+score38 <- 0
+score52 <- 0
+score68 <- 0
+score70 <- 0
+for (i in range(length(data))){
+    if (tolower(data$topic[i]) %in% topicwords38[,top.topic[i]]){
+        score38 <- score38 + 1
+    }
+    if (tolower(data$topic[i]) %in% topicwords52[,top.topic[i]]){
+        score52 <- score52 + 1
+    }
+    if (tolower(data$topic[i]) %in% topicwords68[,top.topic[i]]){
+        score70 <- score68 + 1
+    }
+    if (tolower(data$topic[i]) %in% topicwords70[,top.topic[i]]){
+        score70 <- score70 + 1
+    }
+}
+print(score38)
+print(score52)
+print(score68)
+print(score70)
+
+topics <- unique(data$topic)
+topics.in.38 <- 0
+topics.in.52 <- 0
+topics.in.68 <- 0
+topics.in.70 <- 0
+
+for (i in range(length(topics))){
+     if (tolower(topics[i]) %in% topicwords38){
+         topics.in.38 <- topics.in.38 + 1
+     }
+    if (tolower(topics[i]) %in% topicwords52){
+         topics.in.52 <- topics.in.52 + 1
+    }
+    if (tolower(topics[i]) %in% topicwords68){
+         topics.in.68 <- topics.in.68 + 1
+    }
+    if (tolower(topics[i]) %in% topicwords70){
+         topics.in.70 <- topics.in.70 + 1
+     }
+}
+print(topics.in.38)
+print(topics.in.52)
+print(topics.in.68)
+print(topics.in.70)
+```
